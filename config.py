@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Anthropic ──────────────────────────────────────────────
-ANTHROPIC_API_KEY: str = os.environ["ANTHROPIC_API_KEY"]
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
 
 # ── RSS 피드 목록 ──────────────────────────────────────────

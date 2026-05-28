@@ -1,7 +1,6 @@
 # filter.py
-# Claude API(claude-sonnet-4-5)로 수집된 기사의 FDI 관련성을 판단한다.
-# 기사를 10개씩 배치로 묶어 한 번에 분석해 API 호출 횟수를 줄이고,
-# 시스템 프롬프트에 cache_control 을 적용해 반복 호출 시 토큰 비용을 절감한다.
+# FDI 관련성 필터. ANTHROPIC_API_KEY 가 설정된 경우 Claude API 를 사용하고,
+# 없으면 키워드 기반 필터로 자동 대체한다.
 
 from __future__ import annotations
 
@@ -10,14 +9,44 @@ import logging
 from itertools import islice
 from typing import Any
 
-import anthropic
-
 from collector import Article
 from config import ANTHROPIC_API_KEY, BATCH_SIZE, CLAUDE_MODEL
 
 log = logging.getLogger(__name__)
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+# ── 키워드 필터 설정 ──────────────────────────────────────────────────────────
+
+_FDI_KEYWORDS = [
+    "외국인직접투자", "FDI", "외자", "외국인투자",
+    "투자유치", "투자 유치", "그린필드", "현지법인", "합작법인",
+    "리쇼어링", "니어쇼어링", "공급망 재편",
+    "코트라", "KOTRA", "투자진흥원", "산업통상자원부",
+    "경제특구", "자유무역지대",
+]
+
+_EXCLUDE_KEYWORDS = [
+    "주식", "채권", "펀드", "환율", "금리", "코스피", "코스닥",
+    "부동산", "아파트", "분양",
+]
+
+
+def _keyword_filter(articles: list[Article]) -> list[dict[str, Any]]:
+    """키워드 매칭으로 FDI 관련 기사를 선별한다."""
+    results: list[dict[str, Any]] = []
+    for article in articles:
+        text = f"{article['title']} {article.get('summary', '')}".lower()
+        if any(kw.lower() in text for kw in _EXCLUDE_KEYWORDS):
+            continue
+        matched = [kw for kw in _FDI_KEYWORDS if kw.lower() in text]
+        if matched:
+            results.append({
+                **article,
+                "is_fdi": True,
+                "reason": f"키워드 매칭: {', '.join(matched[:3])}",
+                "summary": article["title"][:50],
+            })
+    log.info("키워드 필터: FDI 관련 기사 %d건 선별 완료", len(results))
+    return results
 
 # 시스템 프롬프트 — 캐시 대상 (요청마다 동일하므로 ephemeral 캐싱 적용)
 _SYSTEM_PROMPT = """\
@@ -78,7 +107,7 @@ def _parse_json(raw: str) -> list[dict[str, Any]]:
     return json.loads(raw[start:end])
 
 
-def _call_claude(batch: list[Article]) -> list[dict[str, Any]]:
+def _call_claude(client, batch: list[Article]) -> list[dict[str, Any]]:
     """배치 기사를 Claude 에 전달해 FDI 판단 결과 목록을 반환한다."""
     response = client.messages.create(
         model=CLAUDE_MODEL,
@@ -115,21 +144,37 @@ def _batched(iterable, n: int):
         yield chunk
 
 
+# ── Claude API 필터 ───────────────────────────────────────────────────────────
+
+def _get_claude_client():
+    import anthropic
+    return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+
 # ── 공개 API ──────────────────────────────────────────────────────────────────
 
 def filter_fdi(articles: list[Article]) -> list[dict[str, Any]]:
-    """기사 목록을 BATCH_SIZE 씩 묶어 Claude 로 FDI 관련성을 판단한다.
+    """기사 목록에서 FDI 관련 기사를 선별한다.
 
-    FDI 관련(is_fdi=True) 기사만 추려 원본 Article 필드에
-    is_fdi / reason / summary 세 필드를 추가해 반환한다.
-    배치 호출 실패 시 해당 배치를 건너뛰고 로그를 남긴다.
+    ANTHROPIC_API_KEY 가 설정된 경우 Claude API 로 정밀 분석하고,
+    없으면 키워드 필터로 대체한다.
     """
+    _key_valid = (
+        ANTHROPIC_API_KEY.startswith("sk-ant-")
+        and len(ANTHROPIC_API_KEY) >= 40
+        and ANTHROPIC_API_KEY.isascii()
+    )
+    if not _key_valid:
+        log.warning("ANTHROPIC_API_KEY 미설정 또는 유효하지 않음 — 키워드 필터로 대체합니다.")
+        return _keyword_filter(articles)
+
+    client = _get_claude_client()
     results: list[dict[str, Any]] = []
 
     for batch_no, batch in enumerate(_batched(articles, BATCH_SIZE), start=1):
         log.info("배치 %d 처리 중 (%d건)...", batch_no, len(batch))
         try:
-            judgments = _call_claude(batch)
+            judgments = _call_claude(client, batch)
         except Exception as exc:
             log.warning("배치 %d 처리 실패 (건너뜀): %s", batch_no, exc)
             continue
