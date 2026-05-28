@@ -1,0 +1,44 @@
+name: FDI 뉴스레터 발행
+
+on:
+  schedule:
+    - cron: "0 22 * * *"   # 매일 KST 09:00 (UTC 22:00)
+  workflow_dispatch:         # 수동 실행
+
+permissions:
+  contents: write            # docs/ 커밋·푸시 권한
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 뉴스레터 파이프라인 실행
+        run: python main.py
+
+      - name: 변경사항 커밋 & 푸시
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git diff --staged --quiet || git commit -m "newsletter: $(date -u +%Y-%m-%d)"
+          git push
+
+      - name: 실패 시 알림
+        if: failure()
+        run: echo "::error::FDI 뉴스레터 파이프라인 실패 — Actions 로그를 확인하세요."
