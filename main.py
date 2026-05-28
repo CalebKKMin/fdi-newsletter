@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -127,7 +127,16 @@ def run() -> None:
     log.info("  FDI 뉴스레터 파이프라인 시작")
     log.info("=" * 50)
     pipeline_start = time.perf_counter()
-    today = date.today()
+    raw = os.environ.get("TARGET_DATE", "").strip()
+    if raw:
+        try:
+            today = datetime.strptime(raw, "%Y-%m-%d").date()
+        except ValueError:
+            log.error("TARGET_DATE 형식 오류: '%s' (YYYY-MM-DD 형식이어야 합니다)", raw)
+            sys.exit(1)
+    else:
+        today = date.today()
+    log.info("  대상 날짜: %s", today.isoformat())
 
     # ── Step 1: RSS 수집 ──────────────────────────────────
     try:

@@ -1,0 +1,49 @@
+name: FDI 뉴스레터 발행
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "뉴스레터 날짜 (YYYY-MM-DD). 비워두면 오늘 날짜 사용."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      TARGET_DATE: ${{ github.event.inputs.target_date }}
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 뉴스레터 파이프라인 실행
+        run: python main.py
+
+      - name: 변경사항 커밋 & 푸시
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          DATE_LABEL="${TARGET_DATE:-$(date -u +%Y-%m-%d)}"
+          git diff --staged --quiet || git commit -m "newsletter: ${DATE_LABEL}"
+          git push
+
+      - name: 실패 시 알림
+        if: failure()
+        run: echo "::error::FDI 뉴스레터 파이프라인 실패 — Actions 로그를 확인하세요."
