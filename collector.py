@@ -64,8 +64,9 @@ def _summary(entry: feedparser.FeedParserDict) -> str:
 
 # ── 공개 API ──────────────────────────────────────────────────────────────────
 
-def fetch_feed(feed_url: str) -> list[Article]:
-    """단일 RSS 피드를 파싱해 오늘 날짜 Article 목록을 반환한다.
+def fetch_feed(feed_url: str, target_date: date | None = None) -> list[Article]:
+    """단일 RSS 피드를 파싱해 target_date 날짜 Article 목록을 반환한다.
+    target_date 가 None 이면 오늘 날짜를 사용한다.
     수집 실패 또는 파싱 오류 시 빈 리스트를 반환하고 로그를 남긴다.
     """
     try:
@@ -79,7 +80,7 @@ def fetch_feed(feed_url: str) -> list[Article]:
         return []
 
     source = _extract_source(feed)
-    today = date.today()
+    check_date = target_date or date.today()
     articles: list[Article] = []
 
     for entry in feed.entries[:MAX_ARTICLES_PER_FEED]:
@@ -87,7 +88,7 @@ def fetch_feed(feed_url: str) -> list[Article]:
         if pub_date is None:
             log.debug("발행일 없음, 건너뜀: %s", entry.get("title", ""))
             continue
-        if pub_date != today:
+        if pub_date != check_date:
             continue
 
         url = entry.get("link", "").strip()
@@ -105,19 +106,19 @@ def fetch_feed(feed_url: str) -> list[Article]:
             )
         )
 
-    log.info("[%s] 오늘 기사 %d건 수집", source, len(articles))
+    log.info("[%s] %s 기사 %d건 수집", source, check_date.isoformat(), len(articles))
     return articles
 
 
-def collect_all() -> list[Article]:
+def collect_all(target_date: date | None = None) -> list[Article]:
     """RSS_FEEDS 의 모든 피드를 수집한다.
-    중복 URL 을 제거하고 발행일 내림차순(기사 제목 오름차순)으로 정렬해 반환한다.
+    target_date 날짜의 기사만 수집하며, 중복 URL 을 제거하고 정렬해 반환한다.
     """
     seen_urls: set[str] = set()
     all_articles: list[Article] = []
 
     for url in RSS_FEEDS:
-        for article in fetch_feed(url):
+        for article in fetch_feed(url, target_date):
             if article["url"] in seen_urls:
                 continue
             seen_urls.add(article["url"])
