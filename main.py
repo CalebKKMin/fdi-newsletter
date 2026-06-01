@@ -45,9 +45,21 @@ def _step(name: str):
     return _ctx()
 
 
+def _cleanup_old_newsletters(keep_date: date) -> None:
+    """선택된 날짜 외의 뉴스레터 HTML 파일을 삭제한다."""
+    removed = 0
+    for f in DOCS_DIR.glob("????-??-??.html"):
+        if f.stem != keep_date.isoformat():
+            f.unlink()
+            removed += 1
+    if removed:
+        log.info("이전 뉴스레터 %d건 삭제 완료", removed)
+
+
 def _save_newsletter(html_content: str, today: date) -> Path:
-    """docs/YYYY-MM-DD.html 로 저장한다."""
+    """docs/YYYY-MM-DD.html 로 저장하고 이전 날짜 파일을 삭제한다."""
     DOCS_DIR.mkdir(exist_ok=True)
+    _cleanup_old_newsletters(today)
     out_path = DOCS_DIR / f"{today.isoformat()}.html"
     out_path.write_text(html_content, encoding="utf-8")
     log.info("저장: %s", out_path)
@@ -78,6 +90,9 @@ def _rebuild_index() -> None:
         else '      <p class="empty">아직 발행된 뉴스레터가 없습니다.</p>'
     )
 
+    # 날짜 선택 시 이동 가능한 날짜 목록 (JS용)
+    available_dates_js = ", ".join(f'"{f.stem}"' for f in files)
+
     index_html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -92,6 +107,13 @@ def _rebuild_index() -> None:
     header h1 {{ font-size: 22px; font-weight: 700; }}
     header p {{ font-size: 13px; color: rgba(255,255,255,.85); margin-top: 4px; }}
     .container {{ max-width: 720px; margin: 0 auto; padding: 24px 16px; }}
+    .date-picker-bar {{ background: #fff; border: 1px solid #d5d8dc; border-radius: 6px; padding: 16px 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }}
+    .date-picker-bar label {{ font-size: 13px; font-weight: 600; color: #1a5276; white-space: nowrap; }}
+    .date-picker-bar input[type="date"] {{ border: 1px solid #aab7b8; border-radius: 4px; padding: 6px 10px; font-size: 13px; color: #2c3e50; outline: none; }}
+    .date-picker-bar input[type="date"]:focus {{ border-color: #1a5276; }}
+    .date-picker-bar button {{ background: #1a5276; color: #fff; border: none; border-radius: 4px; padding: 7px 16px; font-size: 13px; cursor: pointer; white-space: nowrap; }}
+    .date-picker-bar button:hover {{ background: #2e86c1; }}
+    .date-picker-bar .msg {{ font-size: 12px; color: #e74c3c; display: none; }}
     .summary {{ background: #fff; border-left: 4px solid #2e86c1; padding: 12px 20px; margin-bottom: 20px; font-size: 14px; color: #1a5276; font-weight: 600; }}
     .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }}
     .card {{ display: block; background: #fff; border: 1px solid #d5d8dc; border-radius: 6px; padding: 14px 16px; text-decoration: none; color: inherit; transition: box-shadow .15s, border-color .15s; }}
@@ -109,12 +131,34 @@ def _rebuild_index() -> None:
     <p>총 {total}개 발행</p>
   </header>
   <div class="container">
+    <div class="date-picker-bar">
+      <label for="date-pick">날짜 선택</label>
+      <input type="date" id="date-pick">
+      <button onclick="goToDate()">이동</button>
+      <span class="msg" id="date-msg">해당 날짜의 뉴스레터가 없습니다.</span>
+    </div>
     <div class="summary">날짜를 선택해 해당 일자의 뉴스레터를 확인하세요.</div>
     <div class="grid">
 {cards_html}
     </div>
   </div>
   <footer>자동 생성 · FDI 뉴스레터 파이프라인</footer>
+  <script>
+    var available = [{available_dates_js}];
+    function goToDate() {{
+      var d = document.getElementById('date-pick').value;
+      var msg = document.getElementById('date-msg');
+      if (!d) {{ msg.style.display = 'none'; return; }}
+      if (available.indexOf(d) !== -1) {{
+        window.location.href = d + '.html';
+      }} else {{
+        msg.style.display = 'inline';
+      }}
+    }}
+    document.getElementById('date-pick').addEventListener('change', function() {{
+      document.getElementById('date-msg').style.display = 'none';
+    }});
+  </script>
 </body>
 </html>"""
 
